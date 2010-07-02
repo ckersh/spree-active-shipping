@@ -50,5 +50,7 @@ class ActiveShippingExtension < Spree::Extension
       Calculator::Usps::PriorityMailRegularMediumFlatRateBoxes,
       Calculator::Usps::PriorityMailLargeFlatRateBox
     ].each(&:register)
+
+    ShippingMethod.send(:include, Spree::ActiveShipping::ShippingMethod);
   end
 end

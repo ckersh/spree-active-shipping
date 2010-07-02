@@ -11,6 +11,8 @@ class Calculator::ActiveShipping < Calculator
   end
 
   def compute(line_items)
+#	logger.debug("INSPECT line_items: #{line_items.inspect}")
+
     order = line_items.first.order
     origin      = Location.new(:country => Spree::ActiveShipping::Config[:origin_country],
                                :city => Spree::ActiveShipping::Config[:origin_city],
@@ -23,13 +25,18 @@ class Calculator::ActiveShipping < Calculator
                               :state => (addr.state ? addr.state.abbr : addr.state_name),
                               :city => addr.city,
                               :zip => addr.zipcode)
-
     rates = Rails.cache.fetch(cache_key(line_items)) do
-      rates = retrieve_rates(origin, destination, packages(order))
+      rates = retrieve_rates(origin, destination, packages(line_items))
     end
+
+#    logger.debug("INSPECT RATES:#{rates.inspect}")
 
     return nil if rates.empty?
     rate = rates[self.description].to_f + (Spree::ActiveShipping::Config[:handling_fee].to_f || 0.0)
+
+#    logger.debug("INSPECT RATE:#{rate}")
+
+    rate
     return nil unless rate
     # divide by 100 since active_shipping rates are expressed as cents
 
@@ -40,7 +47,8 @@ class Calculator::ActiveShipping < Calculator
 
   def retrieve_rates(origin, destination, packages)
     begin
-      response = carrier.find_rates(origin, destination, packages)
+#logger.debug("PACKAGES:#{packages.inspect}")
+    response = carrier.find_rates(origin, destination, packages)
       # turn this beastly array into a nice little hash
       Hash[*response.rates.collect { |rate| [rate.service_name, rate.price] }.flatten]
     rescue ActiveMerchant::Shipping::ResponseError => re
@@ -58,13 +66,24 @@ class Calculator::ActiveShipping < Calculator
   end
 
   # Generates an array of Package objects based on the quantities and weights of the variants in the line items
-  def packages(order)
+  def packages(line_items)
     multiplier = Spree::ActiveShipping::Config[:unit_multiplier]
-    weight = order.line_items.inject(0) do |weight, line_item|
-      weight + (line_item.variant.weight ? (line_item.quantity * line_item.variant.weight * multiplier) : 0)
+    dimensions = []
+    results = []  
+    line_items.each do |line_item|
+      weight = (line_item.variant.weight ? (line_item.variant.weight * multiplier) : 0)
+
+      width  = line_item.variant.width  ? line_item.variant.width  : 0
+      height = line_item.variant.height ? line_item.variant.height : 0
+      depth  = line_item.variant.depth  ? line_item.variant.depth  : 0
+      dimensions = width && height && depth ? [width, height, depth] : []
+#logger.debug("PACKAGES: quantity #{line_item.quantity}")
+      (1..line_item.quantity).each do |count|      
+      package = Package.new(weight, dimensions, :units => Spree::ActiveShipping::Config[:units].to_sym)
+      results << package
+      end
     end
-    package = Package.new(weight, [], :units => Spree::ActiveShipping::Config[:units].to_sym)
-    [package]
+    results
   end
 
   def cache_key(line_items)
